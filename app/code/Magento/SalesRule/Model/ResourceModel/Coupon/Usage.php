@@ -5,6 +5,10 @@
  */
 namespace Magento\SalesRule\Model\ResourceModel\Coupon;
 
+use Magento\Framework\Exception\LocalizedException;
+use Magento\SalesRule\Exception\CouponUsageExceeded;
+use Magento\SalesRule\Model\Coupon;
+
 /**
  * SalesRule Model Resource Coupon_Usage
  *
@@ -25,12 +29,14 @@ class Usage extends \Magento\Framework\Model\ResourceModel\Db\AbstractDb
     /**
      * Increment times_used counter
      *
+     * @param Coupon $coupon
      * @param int $customerId
      * @param mixed $couponId
      * @param bool $increment
      * @return void
+     * @throws LocalizedException
      */
-    public function updateCustomerCouponTimesUsed($customerId, $couponId, $increment = true): void
+    public function updateCustomerCouponTimesUsed(Coupon $coupon, $customerId, $couponId, $increment = true): void
     {
         $connection = $this->getConnection();
         $select = $connection->select();
@@ -43,9 +49,16 @@ class Usage extends \Magento\Framework\Model\ResourceModel\Db\AbstractDb
             'customer_id = :customer_id'
         );
 
-        $timesUsed = $connection->fetchOne($select, [':coupon_id' => $couponId, ':customer_id' => $customerId]);
+        $timesUsed = (int)$connection->fetchOne($select, [':coupon_id' => $couponId, ':customer_id' => $customerId]);
 
-        if ($timesUsed !== false) {
+        if ($increment &&
+            $coupon->getUsagePerCustomer() > 0 &&
+            $timesUsed >= $coupon->getUsagePerCustomer()
+        ) {
+            throw new CouponUsageExceeded(__("The coupon code isn't valid. Verify the code and try again."));
+        }
+
+        if ($timesUsed) {
             $this->getConnection()->update(
                 $this->getMainTable(),
                 ['times_used' => $timesUsed + ($increment ? 1 : -1)],
@@ -66,6 +79,7 @@ class Usage extends \Magento\Framework\Model\ResourceModel\Db\AbstractDb
      * @param int $customerId
      * @param mixed $couponId
      * @return $this
+     * @throws LocalizedException
      */
     public function loadByCustomerCoupon(\Magento\Framework\DataObject $object, $customerId, $couponId)
     {

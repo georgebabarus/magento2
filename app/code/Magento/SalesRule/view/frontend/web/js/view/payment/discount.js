@@ -9,8 +9,19 @@ define([
     'uiComponent',
     'Magento_Checkout/js/model/quote',
     'Magento_SalesRule/js/action/set-coupon-code',
-    'Magento_SalesRule/js/action/cancel-coupon'
-], function ($, ko, Component, quote, setCouponCodeAction, cancelCouponAction) {
+    'Magento_SalesRule/js/action/cancel-coupon',
+    'Magento_SalesRule/js/action/on-order-place',
+    'Magento_Checkout/js/model/payment/after-place-order-callbacks'
+], function (
+    $,
+    ko,
+    Component,
+    quote,
+    setCouponCodeAction,
+    cancelCouponAction,
+    onOrderPlaceAction,
+    orderPlaceCallbacks
+) {
     'use strict';
 
     var totals = quote.getTotals(),
@@ -22,6 +33,7 @@ define([
     }
     isApplied = ko.observable(couponCode() != null);
 
+
     return Component.extend({
         defaults: {
             template: 'Magento_SalesRule/payment/discount'
@@ -32,6 +44,11 @@ define([
          * Applied flag
          */
         isApplied: isApplied,
+
+        initialize: function () {
+            this._super();
+            orderPlaceCallbacks.push(this.afterOrderPlaced);
+        },
 
         /**
          * Coupon code application procedure
@@ -50,6 +67,16 @@ define([
                 couponCode('');
                 cancelCouponAction(isApplied);
             }
+        },
+
+        /**
+         *
+         * @param object paymentView
+         * @param object response
+         * @returns {*}
+         */
+        afterOrderPlaced: function (paymentView, response, previousTotals) {
+            return onOrderPlaceAction(paymentView, response, previousTotals, couponCode, isApplied);
         },
 
         /**

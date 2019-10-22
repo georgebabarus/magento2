@@ -85,6 +85,7 @@ class Discount extends \Magento\Quote\Model\Quote\Address\Total\AbstractTotal
      * @param \Magento\Quote\Model\Quote\Address\Total $total
      * @return $this
      * @SuppressWarnings(PHPMD.CyclomaticComplexity)
+     * @throws \Magento\Framework\Exception\NoSuchEntityException
      */
     public function collect(
         \Magento\Quote\Model\Quote $quote,

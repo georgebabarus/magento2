@@ -7,8 +7,12 @@ declare(strict_types=1);
 
 namespace Magento\SalesRule\Plugin;
 
+use Magento\Framework\Exception\InputException;
+use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Sales\Model\OrderRepository;
 use Magento\Sales\Model\Service\OrderService;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\SalesRule\Exception\CouponUsageExceeded;
 use Magento\SalesRule\Model\Coupon\UpdateCouponUsages;
 
 /**
@@ -45,6 +49,10 @@ class CouponUsagesDecrement
      * @param bool $result
      * @param int $orderId
      * @return bool
+     * @throws CouponUsageExceeded
+     * @throws LocalizedException
+     * @throws InputException
+     * @throws NoSuchEntityException
      * @SuppressWarnings(PHPMD.UnusedFormalParameter)
      */
     public function afterCancel(OrderService $subject, bool $result, $orderId): bool

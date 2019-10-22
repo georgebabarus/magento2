@@ -6,7 +6,11 @@
 
 namespace Magento\Checkout\Model;
 
+use Magento\Checkout\Api\Data\PlaceOrderDetailsInterface;
+use Magento\Framework\App\ObjectManager;
 use Magento\Framework\Exception\CouldNotSaveException;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\Quote\Api\CartRepositoryInterface;
 
 /**
  * Payment information management service.
@@ -47,7 +51,7 @@ class PaymentInformationManagement implements \Magento\Checkout\Api\PaymentInfor
     private $logger;
 
     /**
-     * @var \Magento\Quote\Api\CartRepositoryInterface
+     * @var CartRepositoryInterface
      */
     private $cartRepository;
 
@@ -57,6 +61,7 @@ class PaymentInformationManagement implements \Magento\Checkout\Api\PaymentInfor
      * @param \Magento\Quote\Api\CartManagementInterface $cartManagement
      * @param PaymentDetailsFactory $paymentDetailsFactory
      * @param \Magento\Quote\Api\CartTotalRepositoryInterface $cartTotalsRepository
+     * @param CartRepositoryInterface|null $cartRepository
      * @codeCoverageIgnore
      */
     public function __construct(
@@ -64,13 +69,49 @@ class PaymentInformationManagement implements \Magento\Checkout\Api\PaymentInfor
         \Magento\Quote\Api\PaymentMethodManagementInterface $paymentMethodManagement,
         \Magento\Quote\Api\CartManagementInterface $cartManagement,
         \Magento\Checkout\Model\PaymentDetailsFactory $paymentDetailsFactory,
-        \Magento\Quote\Api\CartTotalRepositoryInterface $cartTotalsRepository
+        \Magento\Quote\Api\CartTotalRepositoryInterface $cartTotalsRepository,
+        \Magento\Quote\Api\CartRepositoryInterface $cartRepository = null
     ) {
         $this->billingAddressManagement = $billingAddressManagement;
-        $this->paymentMethodManagement = $paymentMethodManagement;
-        $this->cartManagement = $cartManagement;
-        $this->paymentDetailsFactory = $paymentDetailsFactory;
-        $this->cartTotalsRepository = $cartTotalsRepository;
+        $this->paymentMethodManagement  = $paymentMethodManagement;
+        $this->cartManagement           = $cartManagement;
+        $this->paymentDetailsFactory    = $paymentDetailsFactory;
+        $this->cartTotalsRepository     = $cartTotalsRepository;
+        $this->cartRepository           = $cartRepository ??
+                                          ObjectManager::getInstance()->get(CartRepositoryInterface::class);
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function placeOrder(
+        $cartId,
+        \Magento\Quote\Api\Data\PaymentInterface $paymentMethod,
+        \Magento\Quote\Api\Data\AddressInterface $billingAddress = null
+    ): PlaceOrderDetailsInterface {
+        $orderPlaceDetails = new PlaceOrderDetails();
+
+        try {
+            $this->savePaymentInformation($cartId, $paymentMethod, $billingAddress);
+            $orderPlaceDetails->setOrderId($this->cartManagement->placeOrder($cartId));
+        } catch (LocalizedException $e) {
+            $orderPlaceDetails->addError($e->getMessage());
+            $this->getLogger()->critical(
+                'Placing an order with quote_id ' . $cartId . ' is failed: ' . $e->getMessage()
+            );
+        } catch (\Exception $e) {
+            $this->getLogger()->critical($e);
+            throw new CouldNotSaveException(
+                __('A server error stopped your order from being placed. Please try to place your order again.'),
+                $e
+            );
+        }
+
+        if ($orderPlaceDetails->hasErrors()) {
+            $orderPlaceDetails->setTotals($this->cartTotalsRepository->get($cartId));
+        }
+
+        return $orderPlaceDetails;
     }
 
     /**
@@ -81,25 +122,14 @@ class PaymentInformationManagement implements \Magento\Checkout\Api\PaymentInfor
         \Magento\Quote\Api\Data\PaymentInterface $paymentMethod,
         \Magento\Quote\Api\Data\AddressInterface $billingAddress = null
     ) {
-        $this->savePaymentInformation($cartId, $paymentMethod, $billingAddress);
-        try {
-            $orderId = $this->cartManagement->placeOrder($cartId);
-        } catch (\Magento\Framework\Exception\LocalizedException $e) {
-            $this->getLogger()->critical(
-                'Placing an order with quote_id ' . $cartId . ' is failed: ' . $e->getMessage()
-            );
+        $orderPlaceDetails = $this->placeOrder($cartId, $paymentMethod, $billingAddress);
+
+        if ($orderPlaceDetails->getOrderId() !== 0) {
             throw new CouldNotSaveException(
-                __($e->getMessage()),
-                $e
-            );
-        } catch (\Exception $e) {
-            $this->getLogger()->critical($e);
-            throw new CouldNotSaveException(
-                __('A server error stopped your order from being placed. Please try to place your order again.'),
-                $e
+                __('A server error stopped your order from being placed. Please try to place your order again.')
             );
         }
-        return $orderId;
+        return $orderPlaceDetails->getOrderId();
     }
 
     /**
@@ -111,12 +141,9 @@ class PaymentInformationManagement implements \Magento\Checkout\Api\PaymentInfor
         \Magento\Quote\Api\Data\AddressInterface $billingAddress = null
     ) {
         if ($billingAddress) {
-            /** @var \Magento\Quote\Api\CartRepositoryInterface $quoteRepository */
-            $quoteRepository = $this->getCartRepository();
             /** @var \Magento\Quote\Model\Quote $quote */
-            $quote = $quoteRepository->getActive($cartId);
-            $customerId = $quote->getBillingAddress()
-                ->getCustomerId();
+            $quote      = $this->cartRepository->getActive($cartId);
+            $customerId = $quote->getBillingAddress()->getCustomerId();
             if (!$billingAddress->getCustomerId() && $customerId) {
                 //It's necessary to verify the price rules with the customer data
                 $billingAddress->setCustomerId($customerId);
@@ -157,23 +184,8 @@ class PaymentInformationManagement implements \Magento\Checkout\Api\PaymentInfor
     private function getLogger()
     {
         if (!$this->logger) {
-            $this->logger = \Magento\Framework\App\ObjectManager::getInstance()->get(\Psr\Log\LoggerInterface::class);
+            $this->logger = ObjectManager::getInstance()->get(\Psr\Log\LoggerInterface::class);
         }
         return $this->logger;
-    }
-
-    /**
-     * Get Cart repository
-     *
-     * @return \Magento\Quote\Api\CartRepositoryInterface
-     * @deprecated 100.2.0
-     */
-    private function getCartRepository()
-    {
-        if (!$this->cartRepository) {
-            $this->cartRepository = \Magento\Framework\App\ObjectManager::getInstance()
-                ->get(\Magento\Quote\Api\CartRepositoryInterface::class);
-        }
-        return $this->cartRepository;
     }
 }
